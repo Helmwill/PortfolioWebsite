@@ -1,0 +1,154 @@
+# =============================================================
+# DEPLOY — Build the portfolio image, push to registry, deploy to VPS
+# Trigger: push to `main`
+#
+# Simplified single-workflow version of the DevOps-Platform pattern:
+# no QA slot, no manual gate, no rollback orchestration. A static
+# portfolio doesn't warrant the full promotion chain — build, ship, live.
+#
+# Image tag = github.sha for traceability (also tagged `latest`).
+#
+# Required GitHub secrets (reuse the dashboard's where you already have them):
+#   REGISTRY_URL       — container registry hostname
+#   REGISTRY_USER      — registry username
+#   REGISTRY_PASSWORD  — registry password / token
+#   VPS_SSH_KEY        — private SSH deploy key (VPS has matching public key)
+#   VPS_USER           — SSH user on the VPS
+#   VPS_HOST           — VPS hostname or IP
+# =============================================================
+
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: deploy-portfolio
+  cancel-in-progress: false
+
+jobs:
+
+  # -----------------------------------------------------------
+  # BUILD — Build and push the portfolio image
+  # -----------------------------------------------------------
+  build:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Log in to container registry
+        run: |
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | \
+            docker login "${{ secrets.REGISTRY_URL }}" \
+              --username "${{ secrets.REGISTRY_USER }}" \
+              --password-stdin
+
+      - name: Build image
+        env:
+          GIT_SHA: ${{ github.sha }}
+          GIT_REF: ${{ github.ref }}
+        run: |
+          docker build \
+            --tag "${{ secrets.REGISTRY_URL }}/portfolio:${GIT_SHA}" \
+            --tag "${{ secrets.REGISTRY_URL }}/portfolio:latest" \
+            --label "git.sha=${GIT_SHA}" \
+            --label "git.ref=${GIT_REF}" \
+            .
+
+      - name: Push image to registry
+        env:
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          docker push "${{ secrets.REGISTRY_URL }}/portfolio:${GIT_SHA}"
+          docker push "${{ secrets.REGISTRY_URL }}/portfolio:latest"
+
+  # -----------------------------------------------------------
+  # DEPLOY — Pull the image on the VPS and bring up the stack
+  # -----------------------------------------------------------
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Write SSH deploy key
+        run: |
+          install -m 600 /dev/null /tmp/deploy_key
+          echo "${{ secrets.VPS_SSH_KEY }}" > /tmp/deploy_key
+
+      - name: Deploy to VPS via SSH
+        run: |
+          ssh -i /tmp/deploy_key \
+              -o StrictHostKeyChecking=no \
+              -o BatchMode=yes \
+              "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+              "
+              set -euo pipefail
+
+              # Authenticate the VPS Docker daemon with the registry
+              echo '${{ secrets.REGISTRY_PASSWORD }}' | \
+                docker login '${{ secrets.REGISTRY_URL }}' \
+                  --username '${{ secrets.REGISTRY_USER }}' \
+                  --password-stdin
+
+              # Pull the exact image just built
+              docker pull '${{ secrets.REGISTRY_URL }}/portfolio:${{ github.sha }}'
+
+              # Ensure the VPS has the latest compose file from this repo
+              git -C ~/portfolio fetch origin && git -C ~/portfolio checkout -B main origin/main
+
+              cd ~/portfolio
+
+              # Inject runtime configuration
+              export IMAGE_TAG='${{ github.sha }}'
+              export REGISTRY_URL='${{ secrets.REGISTRY_URL }}'
+
+              # Bring up the portfolio stack
+              # --pull never: image was already pulled above
+              docker compose up -d --pull never --remove-orphans
+
+              echo '=== Container status after deploy ==='
+              docker compose ps
+              echo '=== Portfolio logs (last 20 lines) ==='
+              docker compose logs --tail=20 portfolio
+              "
+
+      - name: Remove SSH key from runner
+        if: always()
+        run: rm -f /tmp/deploy_key
+
+  # -----------------------------------------------------------
+  # SMOKE TEST — Confirm the site is reachable after deploy
+  # -----------------------------------------------------------
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    needs: deploy
+
+    steps:
+      - name: Wait for site to come up
+        run: |
+          echo "Waiting 20s for the container to pass its healthcheck..."
+          sleep 20
+          echo "Checking https://willmharris.dev/ ..."
+          for i in $(seq 1 12); do
+            STATUS=$(curl --no-progress-meter \
+                          --output /dev/null \
+                          --write-out "%{http_code}" \
+                          --max-time 10 \
+                          "https://willmharris.dev/" 2>/tmp/curl_err || true)
+            CURL_ERR=$(cat /tmp/curl_err 2>/dev/null || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "Site is up (HTTP $STATUS) on attempt $i"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $STATUS — ${CURL_ERR:-no error detail}"
+            sleep 5
+          done
+          echo "SMOKE TEST FAILED: site did not return 200 within 60s"
+          exit 1
