@@ -2,14 +2,18 @@
 # Portfolio — single static service behind the shared Traefik proxy.
 #
 # Traefik routing:
-#   https://willmharris.dev/      → portfolio (nginx, port 8080)
-#   https://www.willmharris.dev/  → same service
-#   http://...                    → redirected to https (web entrypoint)
+#   https://portfolio.helmcommand.website/ → portfolio (nginx, port 8080)
+#   http://...                             → redirected to https (web entrypoint)
 #
 # This stack joins the SAME external `traefik-public` network the
 # dashboard uses, so the existing Traefik instance discovers it.
 # No second proxy, no second cert setup — Let's Encrypt issues a
-# cert for willmharris.dev automatically via the letsencrypt resolver.
+# cert for portfolio.helmcommand.website automatically via the
+# letsencrypt resolver.
+#
+# To add willmharris.dev later: extend the Host() rules below to
+#   Host(`portfolio.helmcommand.website`) || Host(`willmharris.dev`)
+# add a DNS record for the new domain, and redeploy. No rebuild needed.
 #
 # Environment variables injected by the deploy workflow:
 #   IMAGE_TAG      — commit SHA of the build to run (defaults to latest)
@@ -52,20 +56,14 @@ services:
       - "traefik.docker.network=traefik-public"
 
       # ---- HTTP → HTTPS redirect ----
-      - "traefik.http.routers.portfolio-http.rule=Host(`willmharris.dev`) || Host(`www.willmharris.dev`)"
+      - "traefik.http.routers.portfolio-http.rule=Host(`portfolio.helmcommand.website`)"
       - "traefik.http.routers.portfolio-http.entrypoints=web"
       - "traefik.http.routers.portfolio-http.middlewares=redirect-to-https"
 
       # ---- HTTPS router → portfolio ----
-      - "traefik.http.routers.portfolio.rule=Host(`willmharris.dev`) || Host(`www.willmharris.dev`)"
+      - "traefik.http.routers.portfolio.rule=Host(`portfolio.helmcommand.website`)"
       - "traefik.http.routers.portfolio.entrypoints=websecure"
       - "traefik.http.routers.portfolio.tls=true"
       - "traefik.http.routers.portfolio.tls.certresolver=letsencrypt"
       - "traefik.http.routers.portfolio.service=portfolio"
       - "traefik.http.services.portfolio.loadbalancer.server.port=8080"
-
-      # ---- Redirect www → apex (optional canonical host) ----
-      # Uncomment to force www.willmharris.dev → willmharris.dev
-      # - "traefik.http.middlewares.www-redirect.redirectregex.regex=^https://www\\.willmharris\\.dev/(.*)"
-      # - "traefik.http.middlewares.www-redirect.redirectregex.replacement=https://willmharris.dev/$${1}"
-      # - "traefik.http.middlewares.www-redirect.redirectregex.permanent=true"
