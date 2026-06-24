@@ -100,9 +100,9 @@ jobs:
               docker pull '${{ secrets.REGISTRY_URL }}/portfolio:${{ github.sha }}'
 
               # Ensure the VPS has the latest compose file from this repo
-              git -C ~/portfolio fetch origin && git -C ~/portfolio checkout -B main origin/main
+              git -C ~/PortfolioWebsite fetch origin && git -C ~/PortfolioWebsite checkout -B main origin/main
 
-              cd ~/portfolio
+              cd ~/PortfolioWebsite
 
               # Inject runtime configuration
               export IMAGE_TAG='${{ github.sha }}'
