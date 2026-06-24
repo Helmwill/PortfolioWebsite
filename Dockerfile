@@ -8,9 +8,10 @@
 # =============================================================
 
 # --- Build stage ---
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 
-# Enable pnpm via corepack (bundled with Node 20)
+# Enable pnpm via corepack (bundled with Node 22).
+# pnpm 11 (pinned via package.json "packageManager") requires Node 22+.
 RUN corepack enable
 
 WORKDIR /app
