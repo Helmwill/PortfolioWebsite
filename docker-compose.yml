@@ -2,17 +2,17 @@
 # Portfolio — single static service behind the shared Traefik proxy.
 #
 # Traefik routing:
-#   https://portfolio.helmcommand.website/ → portfolio (nginx, port 8080)
-#   http://...                             → redirected to https (web entrypoint)
+#   https://helmcommand.co.uk/ → portfolio (nginx, port 8080)
+#   http://...                 → redirected to https (web entrypoint)
 #
 # This stack joins the SAME external `traefik-public` network the
 # dashboard uses, so the existing Traefik instance discovers it.
 # No second proxy, no second cert setup — Let's Encrypt issues a
-# cert for portfolio.helmcommand.website automatically via the
-# letsencrypt resolver.
+# cert for helmcommand.co.uk automatically via the letsencrypt resolver.
 #
-# To add willmharris.dev later: extend the Host() rules below to
-#   Host(`portfolio.helmcommand.website`) || Host(`willmharris.dev`)
+# To add another hostname later (e.g. willmharris.dev): extend the
+# Host() rules below to
+#   Host(`helmcommand.co.uk`) || Host(`willmharris.dev`)
 # add a DNS record for the new domain, and redeploy. No rebuild needed.
 #
 # Environment variables injected by the deploy workflow:
@@ -56,12 +56,12 @@ services:
       - "traefik.docker.network=traefik-public"
 
       # ---- HTTP → HTTPS redirect ----
-      - "traefik.http.routers.portfolio-http.rule=Host(`portfolio.helmcommand.website`)"
+      - "traefik.http.routers.portfolio-http.rule=Host(`helmcommand.co.uk`)"
       - "traefik.http.routers.portfolio-http.entrypoints=web"
       - "traefik.http.routers.portfolio-http.middlewares=redirect-to-https"
 
       # ---- HTTPS router → portfolio ----
-      - "traefik.http.routers.portfolio.rule=Host(`portfolio.helmcommand.website`)"
+      - "traefik.http.routers.portfolio.rule=Host(`helmcommand.co.uk`)"
       - "traefik.http.routers.portfolio.entrypoints=websecure"
       - "traefik.http.routers.portfolio.tls=true"
       - "traefik.http.routers.portfolio.tls.certresolver=letsencrypt"
