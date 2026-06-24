@@ -3,3 +3,5 @@ packages:
 allowBuilds:
   '@tailwindcss/oxide': false
   esbuild: false
+overrides: 
+  vite: 6.3.5
