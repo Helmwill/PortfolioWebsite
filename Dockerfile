@@ -9,45 +9,26 @@
 
 # --- Build stage ---
 FROM node:22-alpine AS build
-
-# Enable pnpm via corepack (bundled with Node 22).
-# pnpm 11 (pinned via package.json "packageManager") requires Node 22+.
 RUN corepack enable
-
 WORKDIR /app
-
-# Copy manifest, lockfile, and workspace config first for layer caching
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
-
 COPY . .
 RUN pnpm run build
 
 # --- Runtime stage ---
-FROM nginx:alpine AS runtime
-
+FROM nginxinc/nginx-unprivileged:alpine AS runtime
 # Upgrade Alpine packages to pick up any patched OS-level CVEs
+USER root
 RUN apk upgrade --no-cache
-
-# Remove default nginx config and replace with SPA config
+# Replace default site config with SPA config
 RUN rm /etc/nginx/conf.d/default.conf
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-
 # Copy built assets from build stage
 COPY --from=build /app/dist /usr/share/nginx/html
-
-# nginx:alpine ships with a non-root `nginx` user; use it to satisfy
-# security scanners. The server block in nginx.conf listens on 8080.
-RUN chown -R nginx:nginx /usr/share/nginx/html && \
-    chown -R nginx:nginx /var/cache/nginx && \
-    touch /var/run/nginx.pid && \
-    chown nginx:nginx /var/run/nginx.pid
-
+# Drop back to the built-in non-root user (UID 101)
 USER nginx
-
 EXPOSE 8080
-
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:8080/ || exit 1
-
 CMD ["nginx", "-g", "daemon off;"]
